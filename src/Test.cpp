@@ -1,21 +1,42 @@
 ////#include <iostream>
-//#include "Test.h"
+#include "Test.h"
+
+
+#define X_ADD 100
+
+
+Rectangle::Rectangle()
+{
+    width = 1;
+    height = 1;
+}
+
+Rectangle::~Rectangle()
+{
+    
+}
+
+void do_math(int a) {
+    a += 5;
+}
 //
-//#define X_ADD(a, b) (a+b)
-//
-//void do_math(int *a) {
-//    *a += 5;
-//}
-//
-//void Rectangle::set_values (int x, int y) {
-//    width = x;
-//    height = y;
-//}
-//
-//int Rectangle::fun1 () {
-//    int i = 2;
-//    return i;
-//}
+void Rectangle::set_values (int x, int y) {
+    width = x;
+    height = y;
+}
+
+int Rectangle::fun1 () {
+    set_values(100, 200);
+    do_math(1);
+    UU::sss(false, false);
+    int i = X_ADD;
+    return i;
+}
+
+void UU::sss(bool x, bool y)
+{
+    
+}
 //
 //
 //int main () {
@@ -29,8 +50,8 @@
 //}
 //
 
-int main () {
-    int val =4;
-    return 0;
-}
+//int main () {
+//    int val =4;
+//    return 0;
+//}
 

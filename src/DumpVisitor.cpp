@@ -1,0 +1,889 @@
+//
+//  DumpVisitor.cpp
+//  cpp2lua
+//
+//  Created by sql on 2018/11/17.
+//  Copyright © 2018年 sql. All rights reserved.
+//
+
+#include "DumpVisitor.hpp"
+#include "Utils.hpp"
+#include "clang/Rewrite/Core/Rewriter.h"
+
+Rewriter rewriter;
+
+std::string EscapeString(std::string const& input)
+{
+    std::ostringstream ss;
+    for (auto c : input)
+    {
+        switch (c)
+        {
+            case '\\':
+                ss << "\\\\";
+                break;
+            case '"':
+                ss << "\\\"";
+                break;
+            case '/':
+                ss << "\\/";
+                break;
+            case '\b':
+                ss << "\\b";
+                break;
+            case '\f':
+                ss << "\\f";
+                break;
+            case '\n':
+                ss << "\\n";
+                break;
+            case '\r':
+                ss << "\\r";
+                break;
+            case '\t':
+                ss << "\\t";
+                break;
+            default:
+                ss << c;
+                break;
+        }
+    }
+    return ss.str();
+}
+
+DumpVisitor::DumpVisitor(ASTContext* context)
+: context(context)
+{
+    rewriter.setSourceMgr(context->getSourceManager(), context->getLangOpts());
+}
+
+void DumpVisitor::TraverseNewScope(Stmt* stmt)
+{
+    if (!isa<CompoundStmt>(stmt))
+    {
+        depth++;
+        WriteDepth();
+    }
+    
+    TraverseStmt(stmt);
+    
+    if (!isa<CompoundStmt>(stmt))
+    {
+        std::cout << "\n";
+        depth--;
+    }
+}
+
+void DumpVisitor::TraverseCondition(Stmt* stmt)
+{
+    handlingAssignmentInCondition = true;
+    TraverseStmt(stmt);
+    handlingAssignmentInCondition = false;
+}
+
+std::string DumpVisitor::GetNameForVarDecl(VarDecl* varDecl)
+{
+    auto name = varDecl->getNameAsString();
+    
+    if (varDecl->isStaticLocal() && !name.empty())
+    {
+        std::string prefix = "_";
+        for (auto& string : scopeStack)
+            prefix += string + "_";
+        name = prefix + name;
+    }
+    
+    return name;
+}
+
+bool DumpVisitor::TraverseStmt(Stmt* stmt)
+{
+    if (!stmt)
+        return RecursiveASTVisitor::TraverseStmt(stmt);
+    
+    if (auto compoundStmt = dyn_cast<CompoundStmt>(stmt))
+    {
+        depth++;
+        for (auto stmt : compoundStmt->body())
+        {
+            if (!stmt || isa<NullStmt>(stmt))
+                continue;
+            
+            WriteDepth();
+            // HACK: Fix precedence issues with closures being called straight away
+            if (isa<UnaryOperator>(stmt))
+                std::cout << ";";
+            
+            TraverseStmt(stmt);
+            std::cout << "\n";
+        }
+        depth--;
+        return true;
+    }
+    
+    if(auto declRefExpr = dyn_cast<DeclRefExpr>(stmt))
+    {
+        std::string qualifiedName = declRefExpr->getDecl()->getQualifiedNameAsString();
+        std::cout << Utils::replaceString(qualifiedName, "::", ":");
+        return true;
+    }
+    
+    //成员变量函数
+    if (auto memberExpr = dyn_cast<MemberExpr>(stmt))
+    {
+        if(m_isCXXCall)
+        {
+            std::cout << "self:" << memberExpr->getMemberDecl()->getNameAsString();
+        }
+        else
+        {
+            std::cout << "self." << memberExpr->getMemberDecl()->getNameAsString();
+        }
+        
+        return true;
+    }
+    
+    if (auto callExpr = dyn_cast<CallExpr>(stmt))
+    {
+        m_isCXXCall = false;
+        if(dyn_cast<CXXMemberCallExpr>(stmt))
+            m_isCXXCall = true;
+        
+        TraverseStmt(callExpr->getCallee());
+        bool first = true;
+        std::cout << "(";
+        for (auto param : callExpr->arguments())
+        {
+            if (!first)
+                std::cout << ", ";
+            
+            TraverseStmt(param);
+            first = false;
+        }
+        std::cout << ")";
+        m_isCXXCall = false;
+        return true;
+    }
+    
+    if (auto ifStmt = dyn_cast<IfStmt>(stmt))
+    {
+        std::cout << "if ";
+        TraverseCondition(ifStmt->getCond());
+        std::cout << " then\n";
+        
+        TraverseNewScope(ifStmt->getThen());
+        
+        WriteDepth();
+        auto elseStmt = ifStmt->getElse();
+        if (elseStmt)
+        {
+            std::cout << "else";
+            if (isa<IfStmt>(elseStmt))
+            {
+                TraverseStmt(elseStmt);
+            }
+            else
+            {
+                std::cout << "\n";
+                TraverseNewScope(elseStmt);
+                
+                WriteDepth();
+                std::cout << "end";
+            }
+        }
+        else
+        {
+            std::cout << "end";
+        }
+        return true;
+    }
+    
+    if (auto switchStmt = dyn_cast<SwitchStmt>(stmt))
+    {
+        // Save counter in the event we have nested switches
+        auto currentCounter = counter;
+        std::cout << "local _switchTempTable" << currentCounter << " = {}\n";
+        Stmt* defaultStmtBody = nullptr;
+        
+        if (auto compoundStmt = dyn_cast<CompoundStmt>(switchStmt->getBody()))
+        {
+            bool first = true;
+            for (auto stmt : compoundStmt->body())
+            {
+                if (isa<CaseStmt>(stmt))
+                    TraverseStmt(stmt);
+                else if (auto defaultStmt = dyn_cast<DefaultStmt>(stmt))
+                    defaultStmtBody = defaultStmt->getSubStmt();
+            }
+        }
+        
+        WriteDepth();
+        std::cout << "if _switchTempTable" << currentCounter << "[";
+        TraverseStmt(switchStmt->getCond());
+        std::cout << "] ~= nil then\n";
+        
+        ++depth;
+        WriteDepth();
+        std::cout << "_switchTempTable" << currentCounter << "[";
+        TraverseStmt(switchStmt->getCond());
+        std::cout << "]()\n";
+        --depth;
+        
+        if (defaultStmtBody)
+        {
+            WriteDepth();
+            std::cout << "else\n";
+            TraverseNewScope(defaultStmtBody);
+        }
+        
+        WriteDepth();
+        std::cout << "end";
+        ++counter;
+        
+        return true;
+    }
+    
+    if (auto caseStmt = dyn_cast<CaseStmt>(stmt))
+    {
+        // Save counter in the event we have nested switches
+        auto currentCounter = counter;
+        auto body = caseStmt->getSubStmt();
+        
+        Expr* prevCaseLHS = nullptr;
+        
+        if (isa<CaseStmt>(body))
+        {
+            TraverseStmt(body);
+            prevCaseLHS = dyn_cast<CaseStmt>(body)->getLHS();
+        }
+        
+        WriteDepth();
+        std::cout << "_switchTempTable" << currentCounter << "[";
+        TraverseStmt(caseStmt->getLHS());
+        std::cout << "] = ";
+        
+        if (!isa<CaseStmt>(body))
+        {
+            std::cout << "function()\n";
+            TraverseNewScope(body);
+            WriteDepth();
+            std::cout << "end";
+        }
+        else if (prevCaseLHS)
+        {
+            std::cout << "_switchTempTable" << currentCounter << "[";
+            TraverseStmt(prevCaseLHS);
+            std::cout << "]";
+        }
+        else
+        {
+            // Unhandled catch-all
+            std::cout << "function() end";
+        }
+        
+        std::cout << "\n";
+        
+        return true;
+    }
+    
+    if (auto doStmt = dyn_cast<DoStmt>(stmt))
+    {
+        std::cout << "repeat\n";
+        
+        TraverseNewScope(doStmt->getBody());
+        
+        WriteDepth();
+        std::cout << "until not (";
+        TraverseCondition(doStmt->getCond());
+        std::cout << ")";
+        return true;
+    }
+    
+    if (auto whileStmt = dyn_cast<WhileStmt>(stmt))
+    {
+        std::cout << "while ";
+        TraverseCondition(whileStmt->getCond());
+        std::cout << " do\n";
+        
+        TraverseNewScope(whileStmt->getBody());
+        
+        WriteDepth();
+        std::cout << "end";
+        return true;
+    }
+    
+    // Lower for loops to while loops, because C is a wonderful language
+    // in which anything can happen in a for loop's expressions >_>
+    if (auto forStmt = dyn_cast<ForStmt>(stmt))
+    {
+        TraverseStmt(forStmt->getInit());
+        std::cout << "\n";
+        
+        WriteDepth();
+        std::cout << "while ";
+        TraverseCondition(forStmt->getCond());
+        std::cout << " do\n";
+        
+        TraverseNewScope(forStmt->getBody());
+        ++depth;
+        WriteDepth();
+        std::cout << ";";
+        TraverseStmt(forStmt->getInc());
+        --depth;
+        std::cout << "\n";
+        
+        WriteDepth();
+        std::cout << "end";
+        return true;
+    }
+    
+    if (auto arraySubscriptExpr = dyn_cast<ArraySubscriptExpr>(stmt))
+    {
+        TraverseStmt(arraySubscriptExpr->getBase());
+        std::cout << "[(";
+        TraverseStmt(arraySubscriptExpr->getIdx());
+        // Add 1 to compensate for 1-based indexing
+        std::cout << ")+1]";
+        return true;
+    }
+    
+    if (auto unaryOperator = dyn_cast<UnaryOperator>(stmt))
+    {
+        auto opcode = unaryOperator->getOpcode();
+        switch (opcode)
+        {
+            case UO_Minus:
+                std::cout << "-";
+                TraverseStmt(unaryOperator->getSubExpr());
+                break;
+            case UO_Not:
+                std::cout << "bit._not(";
+                TraverseStmt(unaryOperator->getSubExpr());
+                std::cout << ")";
+                break;
+            case UO_LNot:
+                std::cout << "not ";
+                TraverseStmt(unaryOperator->getSubExpr());
+                break;
+            case UO_Deref:
+            {
+                // Special case based on RHS type
+                auto declRefExpr = RecurseUntilType<DeclRefExpr>(unaryOperator->getSubExpr());
+                if (!declRefExpr)
+                    break;
+                
+                auto decl = declRefExpr->getDecl();
+                auto& type = *decl->getType();
+                if (type.isFunctionPointerType())
+                {
+                    // Emit the decl: no dereferencing required
+                    std::cout << decl->getNameAsString();
+                }
+                break;
+            }
+                // Lower pre/post operators to functions
+                // Pre: (function() expr = expr OP 1; return expr)()
+                // Post: (function() local _ = expr; expr = expr OP 1; return _)()
+            case UO_PreDec:
+                std::cout << "(function() ";
+                TraverseStmt(unaryOperator->getSubExpr());
+                std::cout << " = ";
+                TraverseStmt(unaryOperator->getSubExpr());
+                std::cout << " - 1; return ";
+                TraverseStmt(unaryOperator->getSubExpr());
+                std::cout << " end)()";
+                break;
+            case UO_PreInc:
+                std::cout << "(function() ";
+                TraverseStmt(unaryOperator->getSubExpr());
+                std::cout << " = ";
+                TraverseStmt(unaryOperator->getSubExpr());
+                std::cout << " + 1; return ";
+                TraverseStmt(unaryOperator->getSubExpr());
+                std::cout << " end)()";
+                break;
+            case UO_PostDec:
+                std::cout << "(function() local _ = ";
+                TraverseStmt(unaryOperator->getSubExpr());
+                std::cout << "; ";
+                TraverseStmt(unaryOperator->getSubExpr());
+                std::cout << " = ";
+                TraverseStmt(unaryOperator->getSubExpr());
+                std::cout << " - 1; return _ end)()";
+                break;
+            case UO_PostInc:
+                std::cout << "(function() local _ = ";
+                TraverseStmt(unaryOperator->getSubExpr());
+                std::cout << "; ";
+                TraverseStmt(unaryOperator->getSubExpr());
+                std::cout << " = ";
+                TraverseStmt(unaryOperator->getSubExpr());
+                std::cout << " + 1; return _ end)()";
+                break;
+            default:
+                break;
+        }
+        return true;
+    }
+    
+    if (auto binaryOperator = dyn_cast<BinaryOperator>(stmt))
+    {
+        if (binaryOperator->isAssignmentOp() && handlingAssignmentInCondition)
+        {
+            std::cout << "(function() ";
+        }
+        
+        if (binaryOperator->isCompoundAssignmentOp())
+        {
+            TraverseStmt(binaryOperator->getLHS());
+            std::cout << " = ";
+        }
+        
+        auto opcode = binaryOperator->getOpcode();
+        
+        // Lua doesn't have native bitwise operators, so these need to be lowered
+        // to function calls
+        bool normalBinaryOperator = false;
+        switch (opcode)
+        {
+            case BO_Shl:
+            case BO_ShlAssign:
+                std::cout << "bit._shl(";
+                break;
+            case BO_Shr:
+            case BO_ShrAssign:
+                std::cout << "bit._shr(";
+                break;
+            case BO_And:
+            case BO_AndAssign:
+                std::cout << "bit._and(";
+                break;
+            case BO_Xor:
+            case BO_XorAssign:
+                std::cout << "bit._xor(";
+                break;
+            case BO_Or:
+            case BO_OrAssign:
+                std::cout << "bit._or(";
+                break;
+            default:
+                normalBinaryOperator = true;
+                break;
+        }
+        
+        if (!normalBinaryOperator)
+        {
+            TraverseStmt(binaryOperator->getLHS());
+            std::cout << ", ";
+            TraverseStmt(binaryOperator->getRHS());
+            std::cout << ")";
+            return true;
+        }
+        
+        TraverseStmt(binaryOperator->getLHS());
+        switch (opcode)
+        {
+            case BO_Mul:
+            case BO_MulAssign:
+                std::cout << " * ";
+                break;
+            case BO_Div:
+            case BO_DivAssign:
+                std::cout << " / ";
+                break;
+            case BO_Rem:
+            case BO_RemAssign:
+                std::cout << " % ";
+                break;
+            case BO_Add:
+            case BO_AddAssign:
+                std::cout << " + ";
+                break;
+            case BO_Sub:
+            case BO_SubAssign:
+                std::cout << " - ";
+                break;
+            case BO_LT:
+                std::cout << " < ";
+                break;
+            case BO_GT:
+                std::cout << " > ";
+                break;
+            case BO_LE:
+                std::cout << " <= ";
+                break;
+            case BO_GE:
+                std::cout << " >= ";
+                break;
+            case BO_EQ:
+                std::cout << " == ";
+                break;
+            case BO_NE:
+                std::cout << " ~= ";
+                break;
+            case BO_LAnd:
+                std::cout << " and ";
+                break;
+            case BO_LOr:
+                std::cout << " or ";
+                break;
+            case BO_Comma:
+                std::cout << ", ";
+                break;
+            case BO_Assign:
+                std::cout << " = ";
+                break;
+            default:
+                break;
+        }
+        TraverseStmt(binaryOperator->getRHS());
+        
+        if (binaryOperator->isAssignmentOp() && handlingAssignmentInCondition)
+        {
+            std::cout << "; return ";
+            TraverseStmt(binaryOperator->getLHS());
+            std::cout << " end)()";
+        }
+        
+        return true;
+    }
+    
+    // Lower ternary operator to a closure
+    if (auto conditionalOperator = dyn_cast<ConditionalOperator>(stmt))
+    {
+        std::cout << "(function() if ";
+        TraverseCondition(conditionalOperator->getCond());
+        std::cout << " then return ";
+        TraverseStmt(conditionalOperator->getTrueExpr());
+        std::cout << " else return ";
+        TraverseStmt(conditionalOperator->getFalseExpr());
+        std::cout << " end end)()";
+        return true;
+    }
+    
+    if (auto parenExpr = dyn_cast<ParenExpr>(stmt))
+    {
+        std::cout << "(";
+        TraverseStmt(parenExpr->getSubExpr());
+        std::cout << ")";
+        return true;
+    }
+    
+    if (auto declStmt = dyn_cast<DeclStmt>(stmt))
+    {
+        bool first = true;
+        
+        if (declStmt->isSingleDecl())
+        {
+            auto decl = declStmt->getSingleDecl();
+            
+            if (isa<EnumDecl>(decl))
+            {
+                TraverseDecl(decl);
+                return true;
+            }
+        }
+        
+        struct InitDecl
+        {
+            VarDecl* decl = nullptr;
+            size_t size = 0;
+        };
+        
+        std::vector<InitDecl> initDecls;
+        bool isStatic = false;
+        for (auto decl : declStmt->decls())
+        {
+            if (auto varDecl = dyn_cast<VarDecl>(decl))
+            {
+                if (first)
+                {
+                    isStatic = varDecl->isStaticLocal();
+                    
+                    if (!isStatic)
+                        std::cout << "local ";
+                    else
+                        std::cout << "if ";
+                }
+                else
+                {
+                    if (!isStatic)
+                        std::cout << ", ";
+                    else
+                        std::cout << " or ";
+                }
+                
+                auto name = GetNameForVarDecl(varDecl);
+                if (name.empty())
+                    continue;
+                
+                std::cout << name;
+                
+                if (isStatic)
+                    std::cout << " == nil";
+                
+                InitDecl initDecl;
+                initDecl.decl = varDecl;
+                
+                auto constantArrayType = dyn_cast<ConstantArrayType>(varDecl->getType());
+                if (constantArrayType)
+                    initDecl.size = constantArrayType->getSize().getLimitedValue();
+                
+                initDecls.push_back(initDecl);
+            }
+            else
+            {
+                TraverseDecl(decl);
+            }
+            first = false;
+        }
+        
+        if (isStatic)
+        {
+            std::cout << " then\n";
+            depth++;
+        }
+        
+        if (initDecls.size())
+        {
+            bool first = true;
+            if (!isStatic)
+                std::cout << " = ";
+            
+            for (auto initDecl : initDecls)
+            {
+                auto varDecl = initDecl.decl;
+                auto expr = varDecl->getInit();
+                
+                if (isStatic)
+                {
+                    auto name = GetNameForVarDecl(varDecl);
+                    if (name.empty())
+                        continue;
+                    
+                    WriteDepth();
+                    std::cout << name << " = ";
+                }
+                else
+                {
+                    if (!first)
+                        std::cout << ", ";
+                }
+                
+                if (initDecl.size)
+                    std::cout << "mem.make_array(" << initDecl.size << ", ";
+                
+                if (expr == nullptr)
+                    std::cout << "0";
+                else
+                    TraverseStmt(expr);
+                
+                if (initDecl.size)
+                    std::cout << ")";
+                
+                if (isStatic)
+                    std::cout << "\n";
+                
+                first = false;
+            }
+        }
+        
+        if (isStatic)
+        {
+            depth--;
+            WriteDepth();
+            std::cout << "end";
+        }
+        
+        return true;
+    }
+    
+    if (auto initListExpr = dyn_cast<InitListExpr>(stmt))
+    {
+        bool first = true;
+        std::cout << "{";
+        for (auto expr : *initListExpr)
+        {
+            if (!first)
+                std::cout << ", ";
+            
+            TraverseStmt(expr);
+            first = false;
+        }
+        std::cout << "}";
+        return true;
+    }
+    
+    return RecursiveASTVisitor::TraverseStmt(stmt);
+}
+
+bool DumpVisitor::TraverseDecl(Decl* decl)
+{
+    if (auto functionDecl = dyn_cast<FunctionDecl>(decl))
+    {
+        // Skip over function declarations
+        if (!functionDecl->doesThisDeclarationHaveABody())
+            return true;
+        
+        if (functionDecl->isMain())
+            foundMain = true;
+        
+        std::string funcName = this->GetNameForFuncDecl(functionDecl);
+        
+        scopeStack.push_back(funcName);
+        
+        WriteDepth();
+        std::cout << "function " << funcName;
+        std::cout << "(";
+        bool first = true;
+        int paramNum = functionDecl->getNumParams();
+        for(int i=0; i<paramNum; i++)
+        {
+            auto param = functionDecl->getParamDecl(i);
+            if (!first)
+                std::cout << ", ";
+            
+            std::cout << param->getNameAsString();
+            first = false;
+        }
+        std::cout << ")";
+        std::cout << "\n";
+        
+        if (functionDecl->hasBody())
+            TraverseStmt(functionDecl->getBody());
+        
+        WriteDepth();
+        std::cout << "end\n\n";
+        
+        scopeStack.pop_back();
+        return true;
+    }
+    
+    // Duplicated from TraverseStmt: required to catch
+    // unhandled var decls (see: global scope)
+    if (auto varDecl = dyn_cast<VarDecl>(decl))
+    {
+        auto name = GetNameForVarDecl(varDecl);
+        if (name.empty())
+            return true;
+        
+        std::cout << name;
+        
+        if (varDecl->hasInit())
+        {
+            std::cout << " = ";
+            TraverseStmt(varDecl->getInit());
+        }
+        
+        return true;
+    }
+    
+    if (auto enumDecl = dyn_cast<EnumDecl>(decl))
+    {
+        std::cout << "-- " << enumDecl->getNameAsString();
+        for (auto decl : enumDecl->decls())
+        {
+            std::cout << "\n";
+            WriteDepth();
+            TraverseDecl(decl);
+        }
+        return true;
+    }
+    
+    if (auto enumConstantDecl = dyn_cast<EnumConstantDecl>(decl))
+    {
+        std::cout << "local "
+        << enumConstantDecl->getNameAsString() << " = "
+        << enumConstantDecl->getInitVal().toString(10, true);
+        return true;
+    }
+    
+    return RecursiveASTVisitor::TraverseDecl(decl);
+}
+
+std::string DumpVisitor::GetNameForFuncDecl(FunctionDecl *funcDecl)
+{
+    std::string qualifiedName = funcDecl->getQualifiedNameAsString();
+    std::vector<std::string> nameVec;
+    Utils::splitString(qualifiedName, "::", nameVec);
+    std::string funcName;
+    if(nameVec.size() == 1)//普通函数
+    {
+        funcName = nameVec[0];
+    }
+    else//成员函数
+    {
+        std::string className = nameVec[0];
+        funcName = nameVec[1];
+        if(dyn_cast<CXXConstructorDecl>(funcDecl))
+            funcName = "ator";
+        else if(dyn_cast<CXXDestructorDecl>(funcDecl))
+            funcName = "dtor";
+        
+        funcName = className + ":" + funcName;
+    }
+    
+    return funcName;
+}
+
+bool DumpVisitor::VisitStmt(Stmt* stmt)
+{
+    if (auto stringLiteral = dyn_cast<StringLiteral>(stmt))
+    {
+        std::cout << '"' << EscapeString(stringLiteral->getString().str()) << '"';
+        return true;
+    }
+    
+    if (auto characterLiteral = dyn_cast<CharacterLiteral>(stmt))
+    {
+        // Unlikely to be portable, but works well enough for our purposes
+        auto value = static_cast<wchar_t>(characterLiteral->getValue());
+        std::wcout << L"string.byte(\"" << value << L"\")";
+        return true;
+    }
+    
+    if (auto integerLiteral = dyn_cast<IntegerLiteral>(stmt))
+    {
+        std::cout << integerLiteral->getValue().toString(10, true);
+        return true;
+    }
+    
+    if (auto boolLiteral = dyn_cast<CXXBoolLiteralExpr>(stmt))
+    {
+        std::cout << (boolLiteral->getValue() ? "true" : "false");
+        return true;
+    }
+    
+    if (auto floatingLiteral = dyn_cast<FloatingLiteral>(stmt))
+    {
+        std::cout << floatingLiteral->getValueAsApproximateDouble();
+        return true;
+    }
+    
+    if (auto declRefExpr = dyn_cast<DeclRefExpr>(stmt))
+    {
+        auto decl = declRefExpr->getDecl();
+        if (auto varDecl = cast<VarDecl>(decl))
+            std::cout << GetNameForVarDecl(varDecl);
+        else
+            std::cout << decl->getNameAsString();
+        return true;
+    }
+    
+    if (auto returnStmt = dyn_cast<ReturnStmt>(stmt))
+    {
+        std::cout << "return";
+        if (returnStmt->getRetValue())
+            std::cout << " ";
+        
+        return true;
+    }
+    
+    return RecursiveASTVisitor::VisitStmt(stmt);
+}
+
+void DumpVisitor::WriteDepth()
+{
+    for (uint32_t i = 0; i < depth * 4; ++i)
+        std::cout << ' ';
+}

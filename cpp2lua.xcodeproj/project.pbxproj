@@ -231,7 +231,11 @@
 		3C1B247C219748B4000BA15A /* libunwind.1.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 3C1B2350219748B2000BA15A /* libunwind.1.dylib */; };
 		3C1B247D219748B4000BA15A /* libunwind.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3C1B2351219748B2000BA15A /* libunwind.a */; };
 		3C1B247E219748B4000BA15A /* libunwind.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 3C1B2352219748B2000BA15A /* libunwind.dylib */; };
-		3CEAC06C2198317F006C2287 /* irradiant.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3CEAC06B2198317F006C2287 /* irradiant.cpp */; };
+		3CF2C43F21A0274200A030AF /* Utils.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3CF2C43D21A0274200A030AF /* Utils.cpp */; };
+		3CF2C44421A04D5A00A030AF /* DumpVisitor.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3CF2C43421A01CA800A030AF /* DumpVisitor.cpp */; };
+		3CF2C44521A04D5D00A030AF /* DumpConsumer.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3CF2C43721A01ED200A030AF /* DumpConsumer.cpp */; };
+		3CF2C44621A04D6000A030AF /* DumpAction.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3CF2C43A21A01FCF00A030AF /* DumpAction.cpp */; };
+		3CF2C44721A04D6900A030AF /* irradiant.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3CEAC06B2198317F006C2287 /* irradiant.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -528,11 +532,17 @@
 		3C1B236C219748B2000BA15A /* TestPlugin.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.bundle"; path = TestPlugin.dylib; sourceTree = "<group>"; };
 		3CEAC04D2197ED8D006C2287 /* Test.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = Test.cpp; sourceTree = "<group>"; };
 		3CEAC04F2197EF52006C2287 /* Test.h */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.h; fileEncoding = 4; path = Test.h; sourceTree = "<group>"; };
-		3CEAC0502197F47D006C2287 /* cpp2lua.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = cpp2lua.cpp; sourceTree = "<group>"; };
-		3CEAC0522197F6A2006C2287 /* main.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = main.cpp; sourceTree = "<group>"; };
-		3CEAC05421980BDE006C2287 /* Example.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = Example.cpp; sourceTree = "<group>"; };
 		3CEAC06B2198317F006C2287 /* irradiant.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = irradiant.cpp; sourceTree = "<group>"; };
 		3CEAC06D219831B6006C2287 /* res */ = {isa = PBXFileReference; lastKnownFileType = folder; path = res; sourceTree = "<group>"; };
+		3CF2C43421A01CA800A030AF /* DumpVisitor.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = DumpVisitor.cpp; sourceTree = "<group>"; };
+		3CF2C43521A01CA800A030AF /* DumpVisitor.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = DumpVisitor.hpp; sourceTree = "<group>"; };
+		3CF2C43721A01ED200A030AF /* DumpConsumer.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = DumpConsumer.cpp; sourceTree = "<group>"; };
+		3CF2C43821A01ED200A030AF /* DumpConsumer.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = DumpConsumer.hpp; sourceTree = "<group>"; };
+		3CF2C43A21A01FCF00A030AF /* DumpAction.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = DumpAction.cpp; sourceTree = "<group>"; };
+		3CF2C43B21A01FCF00A030AF /* DumpAction.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = DumpAction.hpp; sourceTree = "<group>"; };
+		3CF2C43D21A0274200A030AF /* Utils.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = Utils.cpp; sourceTree = "<group>"; };
+		3CF2C43E21A0274200A030AF /* Utils.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = Utils.hpp; sourceTree = "<group>"; };
+		3CF2C44221A04C3B00A030AF /* irradiant_bak.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = irradiant_bak.cpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1149,12 +1159,18 @@
 		3CEAC04A2197ED02006C2287 /* src */ = {
 			isa = PBXGroup;
 			children = (
+				3CF2C44221A04C3B00A030AF /* irradiant_bak.cpp */,
 				3CEAC06B2198317F006C2287 /* irradiant.cpp */,
-				3CEAC05421980BDE006C2287 /* Example.cpp */,
-				3CEAC0522197F6A2006C2287 /* main.cpp */,
-				3CEAC0502197F47D006C2287 /* cpp2lua.cpp */,
 				3CEAC04F2197EF52006C2287 /* Test.h */,
 				3CEAC04D2197ED8D006C2287 /* Test.cpp */,
+				3CF2C43421A01CA800A030AF /* DumpVisitor.cpp */,
+				3CF2C43521A01CA800A030AF /* DumpVisitor.hpp */,
+				3CF2C43721A01ED200A030AF /* DumpConsumer.cpp */,
+				3CF2C43821A01ED200A030AF /* DumpConsumer.hpp */,
+				3CF2C43A21A01FCF00A030AF /* DumpAction.cpp */,
+				3CF2C43B21A01FCF00A030AF /* DumpAction.hpp */,
+				3CF2C43D21A0274200A030AF /* Utils.cpp */,
+				3CF2C43E21A0274200A030AF /* Utils.hpp */,
 			);
 			path = src;
 			sourceTree = "<group>";
@@ -1216,7 +1232,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				3CEAC06C2198317F006C2287 /* irradiant.cpp in Sources */,
+				3CF2C44421A04D5A00A030AF /* DumpVisitor.cpp in Sources */,
+				3CF2C43F21A0274200A030AF /* Utils.cpp in Sources */,
+				3CF2C44521A04D5D00A030AF /* DumpConsumer.cpp in Sources */,
+				3CF2C44721A04D6900A030AF /* irradiant.cpp in Sources */,
+				3CF2C44621A04D6000A030AF /* DumpAction.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
