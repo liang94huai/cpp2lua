@@ -1,3 +1,4 @@
+#include <string>
 class Rectangle {  //comment
     int width, height;
 public:

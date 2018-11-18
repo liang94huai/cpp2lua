@@ -30,6 +30,7 @@ int Rectangle::fun1 () {
     do_math(1);
     UU::sss(false, false);
     int i = X_ADD;
+    std::string s = "1235";
     return i;
 }
 
